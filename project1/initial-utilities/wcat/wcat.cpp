@@ -1,5 +1,5 @@
 #include <iostream>
-#include <string>
+#include <string.h>
 #include <fcntl.h>
 #include <unistd.h>
 #include <sys/types.h>
@@ -11,9 +11,11 @@ int main(int argc, char* argv[]) {
   for (int i = 1; i < argc; i ++) {
     const char *file_name = argv[i];
     int f = open(file_name, O_RDONLY);
+    
 
     if (f < 0) { // the read was not successful
-      std::cout << "wcat: cannot open file" << std::endl;
+      const char *err_msg = "wcat: cannot open file\n";
+      write(STDOUT_FILENO, err_msg, strlen(err_msg));
       exit(1);
     }
     
