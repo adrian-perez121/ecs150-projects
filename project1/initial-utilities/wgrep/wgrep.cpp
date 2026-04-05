@@ -12,7 +12,8 @@ bool line_contains_pattern(std::string line, std::string pattern) {
     return false;
   }
   size_t k = 0; // To match with the pattern
-  for (size_t i = 0; (i < line.length() - pattern.size()) && (k < pattern.size()); i++) {
+  for (size_t i = 0;
+       (i < line.length() - pattern.size()) && (k < pattern.size()); i++) {
     // brute force way of string matching
 
     k = 0;
@@ -32,17 +33,17 @@ bool line_contains_pattern(std::string line, std::string pattern) {
 // if the pattern is found it will be printed to standard output
 void perform_grep_on(int file_descriptor, std::string pattern) {
   std::string line; // storing in a string so i don't have to manage the
-                         // buffer size myself
-  char buf[1] = {'0'};   // anything works here, I just don't want random memory
+                    // buffer size myself
+  char c;
   int byte_read = 1; // 1 is a dummy here
 
   while (byte_read > 0) { // the line reading loop
     line = "";
 
-    while ((byte_read = read(file_descriptor, buf, 1)) > 0) {
-      line += buf[0];
+    while ((byte_read = read(file_descriptor, &c, 1)) > 0) {
+      line += c;
 
-      if (buf[0] == '\n') {
+      if (c == '\n') {
         break;
       }
     }
@@ -53,7 +54,7 @@ void perform_grep_on(int file_descriptor, std::string pattern) {
   }
 }
 
-int main(int argc, char* argv[]) {
+int main(int argc, char *argv[]) {
   std::string err_msg;
   int f = STDIN_FILENO; // by default we will use standard input
   std::string pattern;
@@ -71,7 +72,7 @@ int main(int argc, char* argv[]) {
   } else { // we must go through all the files that we specified
     file_name = "README.md";
 
-    for (int i = 2; i < argc; i ++) {
+    for (int i = 2; i < argc; i++) {
       file_name = argv[i];
       f = open(file_name, O_RDONLY);
 

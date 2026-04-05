@@ -1,11 +1,11 @@
+#include <fcntl.h>
+#include <iostream>
+#include <string>
 #include <sys/types.h>
 #include <sys/uio.h>
 #include <unistd.h>
-#include <fcntl.h>
-#include <iostream>
-#include <string> 
 
-int main (int argc, char *argv[]) {
+int main(int argc, char *argv[]) {
   std::string err_msg;
   uint32_t appearances;
   char c;
@@ -22,7 +22,7 @@ int main (int argc, char *argv[]) {
 
     while ((byte_read = read(f, &appearances, 4)) > 0) {
       read(f, &c, 1);
-      for (int j = 0; j < (int) appearances; j++) {
+      for (int j = 0; j < (int)appearances; j++) {
         write(STDOUT_FILENO, &c, 1);
       }
     }
