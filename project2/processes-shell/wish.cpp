@@ -12,9 +12,11 @@ using arg_vector = std::vector<std::string>;
 char ERR_MSG[30] = "An error has occurred\n";
 char PROMPT[7] = "wish> ";
 
-// Outputs the error message to standard error
-void output_error(int location = STDERR_FILENO) {
+// Outputs the error message to standard error and calls exit(1)
+// Once this is run, the program is done.
+void handle_error(int location = STDERR_FILENO) {
   write(location, ERR_MSG, 30);
+  exit(1);
 }
 
 // Returns what the user wrote into standard input
@@ -59,21 +61,25 @@ struct Action {
     if (command == "exit") {
 
       if (args.size() != 0) {
-        output_error();
-        exit(1);
+        handle_error();
       }
 
       exit(0);
+    } else if (command == "cd") {
+
+      if (args.size() == 0 || args.size() > 1 || chdir(args[0].c_str()) == -1) {
+        handle_error();
+      }
+
     }
   }
-    
+
 };
 
 int main(int argc, char *argv[]) {
 
   if (argc > 2) { // At most the shell can take in one file
-    output_error();
-    exit(1);
+    handle_error();
   }
   // auto user_input = get_user_input();
 
@@ -82,10 +88,11 @@ int main(int argc, char *argv[]) {
   // while (ss >> word) {
   //   std::cout << word << std::endl;
   // }
-  arg_vector args = {"hi", "hello"};
-  std::string cmd = "exit";
+  arg_vector args = {".."};
+  std::string cmd = "cd";
   Action test(cmd, args);
 
   test.execute();
+
   return 0;
 }
