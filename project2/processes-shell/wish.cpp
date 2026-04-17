@@ -122,11 +122,12 @@ struct Action {
     }
   }
 
-  // Takes in a string of data, presumably one without any '&' symbols and finds
+  // Takes in a string of data, presumably one without any '&' symbols and
   // determines what the command is, its arguments, and the output destination.
   // If a parsing error happens, then a shell error is raised. Else, an Action
-  // is returned. 
-  // Special case, if only white space is given, no error is given and a nullptr is returned
+  // is returned.
+  // 
+  // Special case: if only white space is given, no error is given and a nullptr is returned
   static std::unique_ptr<Action> ParseAction(std::string action_text, path_vector &paths, pid_queue &pids, int output_location = STDOUT_FILENO) {
     std::stringstream ss(action_text);
 
@@ -174,6 +175,10 @@ struct Action {
       }
     }
 
+    if (!command_found) { // I believe this is not an error case, but still return a nullptr
+      return nullptr;
+    }
+
     if (redirection_found && !redirection_file_found) { // we were given no file to go to 
       handle_error();
       return nullptr;
@@ -192,21 +197,23 @@ int main(int argc, char *argv[]) {
   if (argc > 2) { // At most the shell can take in one file
     handle_error(true);
   }
+  
+  action = Action::ParseAction("      ", paths, pids);
 
-  if (argc == 1) { // we are running in shell mode
-    while (true) {
-      if (!pids.empty()) {
-        waitpid(pids.front(), NULL, 0);
-        pids.pop();
-      }
+  // if (argc == 1) { // we are running in shell mode
+  //   while (true) {
+  //     if (!pids.empty()) {
+  //       waitpid(pids.front(), NULL, 0);
+  //       pids.pop();
+  //     }
 
-      user_input = get_user_input();
-      action = Action::ParseAction(user_input, paths, pids);
-      if (action != nullptr) {
-        action->execute();
-      }
-    }
-  }
+  //     user_input = get_user_input();
+  //     action = Action::ParseAction(user_input, paths, pids);
+  //     if (action != nullptr) {
+  //       action->execute();
+  //     }
+  //   }
+  // }
   // Next Todos:
   // - Make a parser that breaks down a line into different actions based on the
   // & symbol
