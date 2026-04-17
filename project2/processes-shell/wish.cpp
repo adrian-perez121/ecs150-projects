@@ -14,9 +14,11 @@ char PROMPT[7] = "wish> ";
 
 // Outputs the error message to standard error and calls exit(1)
 // Once this is run, the program is done.
-void handle_error(int location = STDERR_FILENO) {
-  write(location, ERR_MSG, 30);
-  exit(1);
+void handle_error(bool terminating = false) {
+  write(STDERR_FILENO, ERR_MSG, 30);
+  if (terminating) {
+    exit(1);
+  }
 }
 
 // Returns what the user wrote into standard input
