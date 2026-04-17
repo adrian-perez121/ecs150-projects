@@ -58,7 +58,19 @@ struct Action {
     }
   }
 
-  // returns the path to the command if it exists, else it returns an empty string
+  // Frees the primitive args and closes any files that were left open 
+  ~Action() { 
+    if (primitive_args) {
+      free(primitive_args);
+    }
+
+    if (output_location != STDOUT_FILENO) {
+      close(output_location);
+    }
+  }
+
+  // returns the path to the command if it exists, else it returns an empty
+  // string
   std::string get_command_path(std::string cmd) {
     std::string cmd_path;
     for (auto path : paths) {
