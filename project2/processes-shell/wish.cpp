@@ -8,9 +8,11 @@
 #include <unistd.h>
 #include <vector>
 #include <memory>
+#include <queue>
 
 using arg_vector = std::vector<std::string>;
 using path_vector = std::vector<std::string>;
+using pid_queue = std::queue<pid_t>;
 char ERR_MSG[30] = "An error has occurred\n";
 char PROMPT[7] = "wish> ";
 
@@ -39,13 +41,12 @@ struct Action {
   std::string command;
   arg_vector args;
   path_vector &paths;
+  pid_queue &pids;
   char **primitive_args;
   int output_location;
 
-  Action(std::string command, arg_vector args, path_vector &paths,
-         int output_location = STDOUT_FILENO)
-      : command(command), args(args), paths(paths),
-        output_location(output_location) {
+  Action(std::string command, arg_vector args, path_vector &paths, pid_queue&pids, int output_location = STDOUT_FILENO)
+      : command(command), args(args), paths(paths), pids(pids), output_location(output_location) {
     primitive_args = (char **)malloc(sizeof(char *) * (args.size() + 2));
 
     primitive_args[0] = (char *) (this->command).c_str();
@@ -80,6 +81,7 @@ struct Action {
   void execute() {
     dup2(output_location, STDOUT_FILENO);
     dup2(output_location, STDERR_FILENO);
+    pid_t pid;
 
     if (command == "exit") {
 
@@ -106,7 +108,15 @@ struct Action {
       if (cmd_path.empty()) {
         handle_error();
       } else {
-        execv(cmd_path.c_str(), primitive_args);
+        pid = fork();
+
+        // So when we execute different commands they will run in their own process
+        // UNLESS its a built in command
+        if (pid == 0) { 
+          execv(cmd_path.c_str(), primitive_args);
+        } else { // append the child to the parent
+          pids.push(pid);
+        }
       }
 
     }
@@ -115,15 +125,15 @@ struct Action {
   // Takes in a string of data, presumably one without any '&' symbols and finds
   // determines what the command is, its arguments, and the output destination.
   // If a parsing error happens, then a shell error is raised. Else, an Action
-  // is returned.
-  static std::unique_ptr<Action> ParseAction(std::string action_text, path_vector &paths) {
+  // is returned. 
+  // Special case, if only white space is given, no error is given and a nullptr is returned
+  static std::unique_ptr<Action> ParseAction(std::string action_text, path_vector &paths, pid_queue &pids, int output_location = STDOUT_FILENO) {
     std::stringstream ss(action_text);
 
     // Word in this context can also mean arguments or '>'
     std::string word;
     std::string cmd;
     arg_vector args;
-    int output_location = STDOUT_FILENO;
 
     bool command_found = false;
     bool redirection_found = false;
@@ -169,26 +179,35 @@ struct Action {
       return nullptr;
     } 
 
-    return std::unique_ptr<Action> (new Action(cmd,args,paths,output_location));
+    return std::unique_ptr<Action> (new Action(cmd,args,paths,pids, output_location));
   }
 };
 
 int main(int argc, char *argv[]) {
+  path_vector paths({"/bin"});
+  std::string user_input;
+  std::unique_ptr<Action> action;
+  pid_queue pids;
 
   if (argc > 2) { // At most the shell can take in one file
-    handle_error();
+    handle_error(true);
   }
 
-  path_vector test_paths({"/bin"});
-  arg_vector test_args({"-a"});
+  if (argc == 1) { // we are running in shell mode
+    while (true) {
+      if (!pids.empty()) {
+        waitpid(pids.front(), NULL, 0);
+        pids.pop();
+      }
 
-  auto test_action = Action::ParseAction("ls > output.txt ", test_paths);
-
-  if (test_action != nullptr) {
-    test_action->execute();
+      user_input = get_user_input();
+      action = Action::ParseAction(user_input, paths, pids);
+      if (action != nullptr) {
+        action->execute();
+      }
+    }
   }
   // Next Todos:
-  // - Make a parser that breaks down an action string into an action object
   // - Make a parser that breaks down a line into different actions based on the
   // & symbol
   // - On each side of the & there should actions
