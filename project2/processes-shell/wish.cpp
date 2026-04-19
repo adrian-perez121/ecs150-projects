@@ -10,6 +10,7 @@
 #include <unistd.h>
 #include <vector>
 #include <sys/wait.h>
+#include <fstream>
 
 using arg_vector = std::vector<std::string>;
 using path_vector = std::vector<std::string>;
@@ -129,8 +130,10 @@ struct Action {
         if (pid == 0) {
           // Since wed don't have to worry about built in commands having a different output location
           // we can call dup2 in the child process and not have to worry about it
-          dup2(output_location, STDOUT_FILENO);
-          dup2(output_location, STDERR_FILENO);
+          if (output_location != STDOUT_FILENO) {
+            dup2(output_location, STDOUT_FILENO);
+            dup2(output_location, STDERR_FILENO);
+          }
 
           execv(cmd_path.c_str(), primitive_args);
         } else { // append the child to the parent
@@ -199,7 +202,7 @@ struct Action {
         }
 
         if (!right.empty()) {
-          output_location = open(right.c_str(), O_WRONLY | O_TRUNC);
+          output_location = open(right.c_str(), O_WRONLY | O_TRUNC | O_CREAT);
           if (output_location < 0) {
             handle_error();
             return nullptr;
@@ -213,7 +216,7 @@ struct Action {
         command_found = true;
 
       } else if (redirection_found && !redirection_file_found) {
-        output_location = open(word.c_str(), O_WRONLY | O_TRUNC);
+        output_location = open(word.c_str(), O_WRONLY | O_TRUNC | O_CREAT);
 
         if (output_location < 0) {
           handle_error();
@@ -301,6 +304,36 @@ int main(int argc, char *argv[]) {
       }
 
     }
+  } else if (argc == 2) { // we are in batch mode
+    std::ifstream file(argv[1]);
+    std::string line;
+
+    if (!file.is_open()){
+      handle_error(true);
+    }
+  
+    while (std::getline(file, line)) {
+      while (!pids.empty()) {
+        waitpid(pids.front(), NULL, 0);
+        pids.pop();
+      }
+      
+      auto actions = get_actions_from_line(line, paths, pids);
+
+      for (auto &action : actions) {
+        if (action != nullptr) {
+          action->execute();
+        }
+      }
+
+      if (file.eof()) {
+        exit(0);
+      }
+
+    }
+
+  } else { // any other case is an error
+    handle_error(true);
   }
 
   return 0;
