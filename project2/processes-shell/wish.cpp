@@ -294,6 +294,12 @@ int main(int argc, char *argv[]) {
           action->execute();
         }
       }
+
+      if (std::cin.eof()){
+        std::cout << std::endl;
+        exit(0);
+      }
+
     }
   }
 
