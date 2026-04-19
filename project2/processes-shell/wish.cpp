@@ -9,6 +9,7 @@
 #include <sys/uio.h>
 #include <unistd.h>
 #include <vector>
+#include <sys/wait.h>
 
 using arg_vector = std::vector<std::string>;
 using path_vector = std::vector<std::string>;
@@ -19,7 +20,8 @@ char PROMPT[7] = "wish> ";
 // Outputs the error message to standard error and calls exit(1)
 // Once this is run, the program is done.
 void handle_error(bool terminating = false) {
-  write(STDERR_FILENO, ERR_MSG, 30);
+  // write(STDERR_FILENO, ERR_MSG, 30);
+  std::cerr << "An error has occurred" << std::endl;
   if (terminating) {
     exit(1);
   }
@@ -93,8 +95,6 @@ struct Action {
   // with the program that was set to execute unless the command was a built in
   // command.
   void execute() {
-    dup2(output_location, STDOUT_FILENO);
-    dup2(output_location, STDERR_FILENO);
     pid_t pid;
 
     if (command == "exit") {
@@ -127,6 +127,11 @@ struct Action {
         // So when we execute different commands they will run in their own
         // process UNLESS its a built in command
         if (pid == 0) {
+          // Since wed don't have to worry about built in commands having a different output location
+          // we can call dup2 in the child process and not have to worry about it
+          dup2(output_location, STDOUT_FILENO);
+          dup2(output_location, STDERR_FILENO);
+
           execv(cmd_path.c_str(), primitive_args);
         } else { // append the child to the parent
           pids.push(pid);
@@ -208,7 +213,7 @@ struct Action {
         command_found = true;
 
       } else if (redirection_found && !redirection_file_found) {
-        int output_location = open(word.c_str(), O_WRONLY | O_TRUNC);
+        output_location = open(word.c_str(), O_WRONLY | O_TRUNC);
 
         if (output_location < 0) {
           handle_error();
@@ -238,6 +243,32 @@ struct Action {
   }
 };
 
+// Returns a vector of pointers to all actions in one line. Multiple actions are separated by the 
+// '&' character
+std::vector<std::unique_ptr<Action>> get_actions_from_line(std::string line, path_vector &paths, pid_queue &pids) {
+  std::vector<std::unique_ptr<Action>> actions;
+  std::string action_string;
+
+
+  for (auto c : line) {
+    if (c == '&') {
+      if (!action_string.empty()) {
+        actions.push_back(Action::ParseAction(action_string, paths, pids));
+        action_string.clear();
+      }
+
+    } else {
+      action_string = action_string + c; 
+    }
+  }
+
+  if (!action_string.empty()) { // For anything after the '&' or if there is no '&'
+    actions.push_back(Action::ParseAction(action_string, paths, pids));
+  }
+
+  return actions;
+}
+
 int main(int argc, char *argv[]) {
   path_vector paths({"/bin"});
   std::string user_input;
@@ -256,16 +287,15 @@ int main(int argc, char *argv[]) {
       }
 
       user_input = get_user_input();
-      action = Action::ParseAction(user_input, paths, pids);
-      if (action != nullptr) {
-        action->execute();
+      auto actions = get_actions_from_line(user_input, paths, pids);
+
+      for (auto &action : actions) {
+        if (action != nullptr) {
+          action->execute();
+        }
       }
     }
   }
-  // Next Todos:
-  // - Make a parser that breaks down a line into different actions based on the
-  // & symbol
-  // - On each side of the & there should actions
 
   return 0;
 }
