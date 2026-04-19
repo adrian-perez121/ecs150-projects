@@ -1,4 +1,5 @@
 #include <fcntl.h>
+#include <fstream>
 #include <iostream>
 #include <memory>
 #include <queue>
@@ -7,10 +8,9 @@
 #include <string>
 #include <sys/types.h>
 #include <sys/uio.h>
+#include <sys/wait.h>
 #include <unistd.h>
 #include <vector>
-#include <sys/wait.h>
-#include <fstream>
 
 using arg_vector = std::vector<std::string>;
 using path_vector = std::vector<std::string>;
@@ -63,8 +63,8 @@ struct Action {
     }
   }
 
-  // Frees the primitive args and closes any files that were left open 
-  ~Action() { 
+  // Frees the primitive args and closes any files that were left open
+  ~Action() {
     if (primitive_args) {
       free(primitive_args);
     }
@@ -128,8 +128,9 @@ struct Action {
         // So when we execute different commands they will run in their own
         // process UNLESS its a built in command
         if (pid == 0) {
-          // Since wed don't have to worry about built in commands having a different output location
-          // we can call dup2 in the child process and not have to worry about it
+          // Since wed don't have to worry about built in commands having a
+          // different output location we can call dup2 in the child process and
+          // not have to worry about it
           if (output_location != STDOUT_FILENO) {
             dup2(output_location, STDOUT_FILENO);
             dup2(output_location, STDERR_FILENO);
@@ -192,8 +193,8 @@ struct Action {
         std::string left = word.substr(0, pos);
         std::string right = word.substr(pos + 1);
 
-        if (!left.empty()) { 
-           if (!command_found) {
+        if (!left.empty()) {
+          if (!command_found) {
             cmd = left;
             command_found = true;
           } else { // if its not a command then its an argument to a command
@@ -246,12 +247,13 @@ struct Action {
   }
 };
 
-// Returns a vector of pointers to all actions in one line. Multiple actions are separated by the 
+// Returns a vector of pointers to all actions in one line. Multiple actions are
+// separated by the
 // '&' character
-std::vector<std::unique_ptr<Action>> get_actions_from_line(std::string line, path_vector &paths, pid_queue &pids) {
+std::vector<std::unique_ptr<Action>>
+get_actions_from_line(std::string line, path_vector &paths, pid_queue &pids) {
   std::vector<std::unique_ptr<Action>> actions;
   std::string action_string;
-
 
   for (auto c : line) {
     if (c == '&') {
@@ -261,11 +263,12 @@ std::vector<std::unique_ptr<Action>> get_actions_from_line(std::string line, pat
       }
 
     } else {
-      action_string = action_string + c; 
+      action_string = action_string + c;
     }
   }
 
-  if (!action_string.empty()) { // For anything after the '&' or if there is no '&'
+  if (!action_string
+           .empty()) { // For anything after the '&' or if there is no '&'
     actions.push_back(Action::ParseAction(action_string, paths, pids));
   }
 
@@ -298,26 +301,25 @@ int main(int argc, char *argv[]) {
         }
       }
 
-      if (std::cin.eof()){
+      if (std::cin.eof()) {
         std::cout << std::endl;
         exit(0);
       }
-
     }
   } else if (argc == 2) { // we are in batch mode
     std::ifstream file(argv[1]);
     std::string line;
 
-    if (!file.is_open()){
+    if (!file.is_open()) {
       handle_error(true);
     }
-  
+
     while (std::getline(file, line)) {
       while (!pids.empty()) {
         waitpid(pids.front(), NULL, 0);
         pids.pop();
       }
-      
+
       auto actions = get_actions_from_line(line, paths, pids);
 
       for (auto &action : actions) {
@@ -329,7 +331,6 @@ int main(int argc, char *argv[]) {
       if (file.eof()) {
         exit(0);
       }
-
     }
 
   } else { // any other case is an error
