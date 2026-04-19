@@ -1,5 +1,7 @@
 #include <fcntl.h>
 #include <iostream>
+#include <memory>
+#include <queue>
 #include <sstream>
 #include <string.h>
 #include <string>
@@ -7,8 +9,6 @@
 #include <sys/uio.h>
 #include <unistd.h>
 #include <vector>
-#include <memory>
-#include <queue>
 
 using arg_vector = std::vector<std::string>;
 using path_vector = std::vector<std::string>;
@@ -45,11 +45,13 @@ struct Action {
   char **primitive_args;
   int output_location;
 
-  Action(std::string command, arg_vector args, path_vector &paths, pid_queue&pids, int output_location = STDOUT_FILENO)
-      : command(command), args(args), paths(paths), pids(pids), output_location(output_location) {
+  Action(std::string command, arg_vector args, path_vector &paths,
+         pid_queue &pids, int output_location = STDOUT_FILENO)
+      : command(command), args(args), paths(paths), pids(pids),
+        output_location(output_location) {
     primitive_args = (char **)malloc(sizeof(char *) * (args.size() + 2));
 
-    primitive_args[0] = (char *) (this->command).c_str();
+    primitive_args[0] = (char *)(this->command).c_str();
     primitive_args[args.size() + 1] = NULL; // null terminated list
 
     // Putting our data into a char ** because that's what execv takes
@@ -122,15 +124,14 @@ struct Action {
       } else {
         pid = fork();
 
-        // So when we execute different commands they will run in their own process
-        // UNLESS its a built in command
-        if (pid == 0) { 
+        // So when we execute different commands they will run in their own
+        // process UNLESS its a built in command
+        if (pid == 0) {
           execv(cmd_path.c_str(), primitive_args);
         } else { // append the child to the parent
           pids.push(pid);
         }
       }
-
     }
   }
 
@@ -138,15 +139,19 @@ struct Action {
   // determines what the command is, its arguments, and the output destination.
   // If a parsing error happens, then a shell error is raised. Else, an Action
   // is returned.
-  // 
-  // Special case: if only white space is given, no error is given and a nullptr is returned
-  static std::unique_ptr<Action> ParseAction(std::string action_text, path_vector &paths, pid_queue &pids, int output_location = STDOUT_FILENO) {
+  //
+  // Special case: if only white space is given, no error is given and a nullptr
+  // is returned
+  static std::unique_ptr<Action>
+  ParseAction(std::string action_text, path_vector &paths, pid_queue &pids,
+              int output_location = STDOUT_FILENO) {
     std::stringstream ss(action_text);
 
     // Word in this context can also mean arguments or '>'
     std::string word;
     std::string cmd;
     arg_vector args;
+    size_t pos;
 
     bool command_found = false;
     bool redirection_found = false;
@@ -157,29 +162,59 @@ struct Action {
       // shell error
       if (redirection_file_found && redirection_found) {
 
-        if (output_location != STDOUT_FILENO) { // if we did open a file then make sure we close it
+        if (output_location !=
+            STDOUT_FILENO) { // if we did open a file then make sure we close it
           close(output_location);
         }
         handle_error();
-        return nullptr; 
+        return nullptr;
       }
 
       // Conventionally, the first argument is the command, you want to execute
-      if (!command_found) {
-        cmd = word;
-        command_found = true;
-      } else if (word == ">") { // when there is a '>' we are redirecting the
-                                // output to the file adjacent of the '>'
-        redirection_found = true;
-      } else if (redirection_found && !redirection_file_found) {
-        int fd = open(word.c_str(), O_WRONLY | O_TRUNC);
-
-        if (fd < 0) {
+      if ((pos = word.find(">")) !=
+          std::string::npos) { // when there is a '>' we are redirecting the
+        // output to the file adjacent of the '>'
+        if (redirection_found) {
           handle_error();
           return nullptr;
         }
 
-        output_location = fd;
+        redirection_found = true;
+
+        std::string left = word.substr(0, pos);
+        std::string right = word.substr(pos + 1);
+
+        if (!left.empty()) { 
+           if (!command_found) {
+            cmd = left;
+            command_found = true;
+          } else { // if its not a command then its an argument to a command
+            args.push_back(left);
+          }
+        }
+
+        if (!right.empty()) {
+          output_location = open(right.c_str(), O_WRONLY | O_TRUNC);
+          if (output_location < 0) {
+            handle_error();
+            return nullptr;
+          }
+
+          redirection_file_found = true;
+        }
+
+      } else if (!command_found) {
+        cmd = word;
+        command_found = true;
+
+      } else if (redirection_found && !redirection_file_found) {
+        int output_location = open(word.c_str(), O_WRONLY | O_TRUNC);
+
+        if (output_location < 0) {
+          handle_error();
+          return nullptr;
+        }
+
         redirection_file_found = true;
       } else { // if none of the above cases are satisfied then it is an
                // argument
@@ -187,16 +222,19 @@ struct Action {
       }
     }
 
-    if (!command_found) { // I believe this is not an error case, but still return a nullptr
+    if (!command_found) { // I believe this is not an error case, but still
+                          // return a nullptr
       return nullptr;
     }
 
-    if (redirection_found && !redirection_file_found) { // we were given no file to go to 
+    if (redirection_found &&
+        !redirection_file_found) { // we were given no file to go to
       handle_error();
       return nullptr;
-    } 
+    }
 
-    return std::unique_ptr<Action> (new Action(cmd,args,paths,pids, output_location));
+    return std::unique_ptr<Action>(
+        new Action(cmd, args, paths, pids, output_location));
   }
 };
 
@@ -209,23 +247,21 @@ int main(int argc, char *argv[]) {
   if (argc > 2) { // At most the shell can take in one file
     handle_error(true);
   }
-  
-  action = Action::ParseAction("      ", paths, pids);
 
-  // if (argc == 1) { // we are running in shell mode
-  //   while (true) {
-  //     if (!pids.empty()) {
-  //       waitpid(pids.front(), NULL, 0);
-  //       pids.pop();
-  //     }
+  if (argc == 1) { // we are running in shell mode
+    while (true) { // change this to be while pids not empty
+      while (!pids.empty()) {
+        waitpid(pids.front(), NULL, 0);
+        pids.pop();
+      }
 
-  //     user_input = get_user_input();
-  //     action = Action::ParseAction(user_input, paths, pids);
-  //     if (action != nullptr) {
-  //       action->execute();
-  //     }
-  //   }
-  // }
+      user_input = get_user_input();
+      action = Action::ParseAction(user_input, paths, pids);
+      if (action != nullptr) {
+        action->execute();
+      }
+    }
+  }
   // Next Todos:
   // - Make a parser that breaks down a line into different actions based on the
   // & symbol
