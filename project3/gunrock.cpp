@@ -122,7 +122,7 @@ void *worker_thread(void *args) {
     }
     // Now that you are sure there's a client in the buffer handle a request
     auto client = clients.front();
-    clients.pop_front(); 
+    clients.pop_front();
 
     // Now that something has been popped off we know there's space in the queue
     dthread_cond_signal(&buffer_has_space);
@@ -193,8 +193,7 @@ int main(int argc, char *argv[]) {
 
     // now entering a critical section
     dthread_mutex_lock(&buff_lock);
-    // now that you have added to the buffer check if its full, if it is then block
-    // else go back to accepting 
+    // First check if you can accept anything
     while ((int) clients.size() == BUFFER_SIZE) {
       dthread_cond_wait(&buffer_has_space, &buff_lock);
     }
