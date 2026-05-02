@@ -30,6 +30,14 @@ string SCHEDALG = "FIFO";
 string LOGFILE = "/dev/null";
 
 vector<HttpService *> services;
+deque<MySocket *> clients;
+
+// Will be used to add and remove from the buffer atomically
+pthread_mutex_t buff_lock = PTHREAD_MUTEX_INITIALIZER;
+// This is what the main thread will wait on and what the worker threads will signal 
+pthread_cond_t buffer_has_space = PTHREAD_COND_INITIALIZER;
+// This is what the worker thread will wait on and what the main thread will signal
+pthread_cond_t buffer_has_clients = PTHREAD_COND_INITIALIZER;
 
 HttpService *find_service(HTTPRequest *request) {
    // find a service that is registered for this path prefix
@@ -104,6 +112,30 @@ void handle_request(MySocket *client) {
   delete client;
 }
 
+void *worker_thread(void *args) {
+  while (true) {
+
+    dthread_mutex_lock(&buff_lock);
+
+    while (clients.empty()) {
+      dthread_cond_wait(&buffer_has_clients, &buff_lock);
+    }
+    // Now that you are sure there's a client in the buffer handle a request
+    auto client = clients.front();
+    clients.pop_front(); 
+
+    // Now that something has been popped off we know there's space in the queue
+    dthread_cond_signal(&buffer_has_space);
+
+    dthread_mutex_unlock(&buff_lock);
+
+    // NOTE: when clients are created they stored on the heap, they are deleted once they are handled
+    handle_request(client); // This is considered reading from the connection
+  }
+
+  return NULL;
+}
+
 int main(int argc, char *argv[]) {
 
   signal(SIGPIPE, SIG_IGN);
@@ -145,10 +177,34 @@ int main(int argc, char *argv[]) {
   // for path prefix matching
   services.push_back(new FileService(BASEDIR));
   
+  // creating the thread pool
+  for (int i = 0; i < THREAD_POOL_SIZE; i++) {
+    pthread_t thread;
+    dthread_create(&thread, NULL, worker_thread, NULL);
+    dthread_detach(thread);
+  }
+  
   while(true) {
+
     sync_print("waiting_to_accept", "");
+    // I believe this client is the descriptor we need to put into a buffer...I hope
     client = server->accept();
     sync_print("client_accepted", "");
-    handle_request(client);
+
+    // now entering a critical section
+    dthread_mutex_lock(&buff_lock);
+    // now that you have added to the buffer check if its full, if it is then block
+    // else go back to accepting 
+    while ((int) clients.size() == BUFFER_SIZE) {
+      dthread_cond_wait(&buffer_has_space, &buff_lock);
+    }
+
+    // add the request to the queue
+    clients.push_back(client);
+
+    // Send a signal to a worker thread that it needs to handle the request
+    dthread_cond_signal(&buffer_has_clients);
+
+    dthread_mutex_unlock(&buff_lock);
   }
 }
