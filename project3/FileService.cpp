@@ -50,6 +50,11 @@ void FileService::get(HTTPRequest *request, HTTPResponse *response) {
 }
 
 string FileService::readFile(string path) {
+
+  if (path.find("..") != string::npos) { // if ".." were found then we have a problem
+    return "";
+  }
+
   int fd = open(path.c_str(), O_RDONLY);
   if (fd < 0) {
     return "";
