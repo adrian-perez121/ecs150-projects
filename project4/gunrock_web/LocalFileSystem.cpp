@@ -2,6 +2,7 @@
 #include <string>
 #include <vector>
 #include <assert.h>
+#include <string.h>
 
 #include "LocalFileSystem.h"
 #include "ufs.h"
@@ -11,10 +12,19 @@ using namespace std;
 
 LocalFileSystem::LocalFileSystem(Disk *disk) {
   this->disk = disk;
+  this->readSuperBlock(this->super);
+}
+
+LocalFileSystem::~LocalFileSystem() {
+  delete super;
 }
 
 void LocalFileSystem::readSuperBlock(super_t *super) {
+  void *buffer[UFS_BLOCK_SIZE];
+  this->disk->readBlock(0, buffer);
 
+  // Reading the data into the super pointer
+  memcpy(super, buffer, sizeof(super_t));
 }
 
 void LocalFileSystem::readInodeBitmap(super_t *super, unsigned char *inodeBitmap) {

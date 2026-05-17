@@ -47,6 +47,7 @@
 class LocalFileSystem {
  public:
   LocalFileSystem(Disk *disk);
+  ~LocalFileSystem();
   /**
    * Lookup an inode.
    *
@@ -147,6 +148,9 @@ class LocalFileSystem {
   // it in a function you add that is not part of the LocalFileSystem object but
   // can still access the disk.
   Disk *disk;
+
+  // The super block of the file system. Contains meta data about the filesystem
+  super_t *super = new super_t;
 };  
 
 #endif
