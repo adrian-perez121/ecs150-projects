@@ -175,6 +175,58 @@ int LocalFileSystem::stat(int inodeNumber, inode_t *inode) {
 }
 
 int LocalFileSystem::read(int inodeNumber, void *buffer, int size) {
+  inode_t inode;
+  super_t super;
+
+  if (stat(inodeNumber, &inode) != 0) {
+    return -EINVALIDINODE;
+  }
+
+  readSuperBlock(&super);
+
+  vector<unsigned char> inode_bitmap(super.num_inodes);
+  vector<unsigned char> data_bitmap(super.num_data);
+
+  readInodeBitmap(&super, inode_bitmap.data());
+  readDataBitmap(&super, data_bitmap.data());
+
+  // Make sure the node is valid
+  int is_valid = (*inode_bitmap.data() >> inodeNumber) & 1;
+  if (!is_valid) {
+    return -EINVALIDINODE;
+  }
+
+  // Make sure we can read the amount of bytes we are being asked of 
+  if (size < 0 || size > inode.size) {
+    return -EINVALIDSIZE;
+  }
+
+  int bytes_remaining = size;
+  int i = 0;
+  int block_addr;
+  unsigned char disk_buffer[UFS_BLOCK_SIZE];
+
+  while (bytes_remaining > 0) {
+    // Because bitmaps are relative to the start of a region (block_addr - super.data_region_addr)
+    // is done to check for valid data blocks
+    int bytes_read = min(UFS_BLOCK_SIZE, bytes_remaining);
+    block_addr = inode.direct[i];
+    is_valid = (*data_bitmap.data() >> (block_addr - super.data_region_addr)) & 1;
+
+    // Make sure the data is valid to read
+    if (!is_valid) {
+      // This is more like a data error though
+      return -EINVALIDINODE;
+    }
+
+    disk->readBlock(block_addr, disk_buffer);
+
+    memcpy((void *) ((unsigned char *) (buffer) + (i * UFS_BLOCK_SIZE)), disk_buffer, bytes_read);
+
+    bytes_remaining = bytes_remaining - bytes_read;
+    i++;
+  }
+
   return 0;
 }
 
