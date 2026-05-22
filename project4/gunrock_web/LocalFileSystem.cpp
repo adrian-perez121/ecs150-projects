@@ -12,11 +12,6 @@ using namespace std;
 
 LocalFileSystem::LocalFileSystem(Disk *disk) {
   this->disk = disk;
-  this->readSuperBlock(this->super);
-}
-
-LocalFileSystem::~LocalFileSystem() {
-  delete super;
 }
 
 void LocalFileSystem::readSuperBlock(super_t *super) {
@@ -90,6 +85,33 @@ int LocalFileSystem::lookup(int parentInodeNumber, string name) {
 }
 
 int LocalFileSystem::stat(int inodeNumber, inode_t *inode) {
+  // Two things to take into account here:
+  // -  it should also not be more than the amount of inodes we can fit
+  // - The inode should be readable, in other words it should be a 1 in the bitamp
+  super_t super;
+  readSuperBlock(&super);
+
+  if (inodeNumber >= super.num_inodes) {
+    return -EINVALIDINODE;
+  }
+  
+  vector<unsigned char> inode_bitmap(super.num_inodes);
+  readInodeBitmap(&super, inode_bitmap.data());
+
+  // Shift over to the bit representing the inode we want to read
+  // & to check if its one
+  int is_valid = (*inode_bitmap.data() >> inodeNumber) & 1;
+
+  if (!is_valid) {
+    return -ENOTALLOCATED;
+  }
+
+  vector<inode_t> inodes(super.num_inodes);
+  readInodeRegion(&super, inodes.data());
+
+  // Fill in the pointer
+  memcpy(inode, &inodes.at(inodeNumber), sizeof(inode_t));
+
   return 0;
 }
 
