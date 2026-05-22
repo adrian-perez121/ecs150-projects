@@ -137,6 +137,9 @@ class LocalFileSystem {
   void readSuperBlock(super_t *super);
 
   // Helper functions, you should read/write the entire inode and bitmap regions
+ 
+  // Very important that when this is called, inodeBitmap is the right size or 
+  // else there will be memory issues
   void readInodeBitmap(super_t *super, unsigned char *inodeBitmap);
   void writeInodeBitmap(super_t *super, unsigned char *inodeBitmap);
   void readDataBitmap(super_t *super, unsigned char *dataBitmap);
