@@ -81,7 +81,66 @@ void LocalFileSystem::writeInodeRegion(super_t *super, inode_t *inodes) {
 }
 
 int LocalFileSystem::lookup(int parentInodeNumber, string name) {
-  return 0;
+  // Two things to look out for
+  // - make sure the inode is directory
+  // - make sure the name is one of the directory entries
+  inode_t inode;
+  
+  // 0 indicates that everything went well
+  if (stat(parentInodeNumber, &inode) != 0) {
+    return -EINVALIDINODE;
+  }
+
+  if (inode.type != UFS_DIRECTORY) {
+    return -EINVALIDINODE;
+  }
+
+  super_t super;
+  readSuperBlock(&super);
+
+  vector<unsigned char> data_bitmap(super.num_data);
+  readDataBitmap(&super, data_bitmap.data());
+
+  // Now that we know it's a directory we have to start checking the data
+  int bytes_read = 0;
+  int i = 0;
+  unsigned char buffer[UFS_BLOCK_SIZE];
+  dir_ent_t entry;
+  
+  while (bytes_read < inode.size && i < DIRECT_PTRS) {
+    int block_addr = inode.direct[i];
+
+    // Because bitmaps are relative to the start of a region (block_addr - super.data_region_addr)
+    // is done to check for valid data blocks
+    int is_valid = (*data_bitmap.data() >> (block_addr - super.data_region_addr)) & 1;
+
+    // Make sure the data is valid to read
+    if (!is_valid) {
+      // This is more like a data error though
+      return -EINVALIDINODE;
+    }
+
+    // read the block
+    disk->readBlock(block_addr, (void *) buffer);
+    int pos = 0; // relative location inside of a block
+    while(bytes_read < UFS_BLOCK_SIZE && bytes_read < inode.size) {
+      memcpy(&entry, buffer + (pos * sizeof(dir_ent_t)), sizeof(dir_ent_t));
+
+      // the correct name was found
+      if (string(entry.name) == name) {
+        return entry.inum;
+      }
+
+      pos++;
+      bytes_read = bytes_read + sizeof(dir_ent_t);
+    }
+
+    // Move onto the next block
+    i++;
+  }
+
+  // The correct name wasn't found
+  return -EINVALIDINODE;
 }
 
 int LocalFileSystem::stat(int inodeNumber, inode_t *inode) {
