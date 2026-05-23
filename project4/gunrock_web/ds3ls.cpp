@@ -59,7 +59,7 @@ int main(int argc, char *argv[]) {
   inode_t inode;
   super_t super;
   fileSystem->readSuperBlock(&super);
-  vector<unsigned char> bitmap(super.num_inodes/8);
+  vector<unsigned char> bitmap((super.num_inodes + 7)/8);
   fileSystem->readInodeBitmap(&super, bitmap.data());
 
   if (fileSystem->stat(current_dir, &inode) != 0) {

@@ -42,7 +42,7 @@ int main(int argc, char *argv[]) {
   cout << endl;
 
   cout << "Inode bitmap" << endl;
-  vector<unsigned char> inode_bitmap(super.num_inodes / 8);
+  vector<unsigned char> inode_bitmap((super.num_inodes + 7) / 8);
   fileSystem->readInodeBitmap(&super, inode_bitmap.data());
 
   for (auto byte : inode_bitmap) {
@@ -52,7 +52,7 @@ int main(int argc, char *argv[]) {
   cout << endl << endl;
 
   cout << "Data bitmap" << endl;
-  vector<unsigned char> data_bitmap(super.num_data / 8);
+  vector<unsigned char> data_bitmap((super.num_data + 7) / 8);
   fileSystem->readDataBitmap(&super, data_bitmap.data());
 
   for (auto byte : data_bitmap) {
