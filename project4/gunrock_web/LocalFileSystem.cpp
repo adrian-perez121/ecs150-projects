@@ -97,7 +97,9 @@ int LocalFileSystem::lookup(int parentInodeNumber, string name) {
 
   vector<dir_ent_t> dir_entries(inode.size / sizeof(dir_ent_t));
 
-  read(parentInodeNumber, dir_entries.data(), inode.size);
+  if (read(parentInodeNumber, dir_entries.data(), inode.size) != 0) {
+    return -EINVALIDINODE;
+  }
   
   // Implement this by doing a read
   // and then just checking each item in the vector and seeing if a name matches
