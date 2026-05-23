@@ -71,7 +71,7 @@ void LocalFileSystem::readInodeRegion(super_t *super, inode_t *inodes) {
 
   for (int i = 0; i < inode_region_len; i++) {
     disk->readBlock(inode_addr + i, (void *) buffer);
-    memcpy(inodes + (UFS_BLOCK_SIZE) * i, buffer, min(bytes_remaining, UFS_BLOCK_SIZE));
+    memcpy(inodes + (UFS_BLOCK_SIZE / sizeof(inode_t)) * i, buffer, min(bytes_remaining, UFS_BLOCK_SIZE));
     bytes_remaining = bytes_remaining - UFS_BLOCK_SIZE;
   }
 }
@@ -127,7 +127,9 @@ int LocalFileSystem::stat(int inodeNumber, inode_t *inode) {
 
   // Shift over to the bit representing the inode we want to read
   // & to check if its one
-  int is_valid = (*inode_bitmap.data() >> inodeNumber) & 1;
+  int byte = inodeNumber / 8;
+  int byte_pos = inodeNumber % 8;
+  int is_valid = (inode_bitmap.at(byte) >> byte_pos) & 1;
 
   if (!is_valid) {
     return -ENOTALLOCATED;
@@ -158,8 +160,10 @@ int LocalFileSystem::read(int inodeNumber, void *buffer, int size) {
   readInodeBitmap(&super, inode_bitmap.data());
   readDataBitmap(&super, data_bitmap.data());
 
-  // Make sure the node is valid
-  int is_valid = (*inode_bitmap.data() >> inodeNumber) & 1;
+  int byte = inodeNumber / 8;
+  int byte_pos = inodeNumber % 8;
+  int is_valid = (inode_bitmap.at(byte) >> byte_pos) & 1;
+
   if (!is_valid) {
     return -EINVALIDINODE;
   }
@@ -179,7 +183,11 @@ int LocalFileSystem::read(int inodeNumber, void *buffer, int size) {
     // is done to check for valid data blocks
     int bytes_read = min(UFS_BLOCK_SIZE, bytes_remaining);
     block_addr = inode.direct[i];
-    is_valid = (*data_bitmap.data() >> (block_addr - super.data_region_addr)) & 1;
+    // Because the bitmap is relative
+    int relative_block_addr = block_addr - super.data_region_addr;
+    int byte = relative_block_addr / 8;
+    int byte_pos = relative_block_addr % 8;
+    is_valid = (data_bitmap.at(byte) >> byte_pos) & 1;
 
     // Make sure the data is valid to read
     if (!is_valid) {
