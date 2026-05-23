@@ -122,7 +122,7 @@ int LocalFileSystem::stat(int inodeNumber, inode_t *inode) {
     return -EINVALIDINODE;
   }
   
-  vector<unsigned char> inode_bitmap(super.num_inodes);
+  vector<unsigned char> inode_bitmap(super.num_inodes / 8);
   readInodeBitmap(&super, inode_bitmap.data());
 
   // Shift over to the bit representing the inode we want to read
@@ -154,7 +154,7 @@ int LocalFileSystem::read(int inodeNumber, void *buffer, int size) {
 
   readSuperBlock(&super);
 
-  vector<unsigned char> inode_bitmap(super.num_inodes);
+  vector<unsigned char> inode_bitmap(super.num_inodes / 8);
   vector<unsigned char> data_bitmap(super.num_data);
 
   readInodeBitmap(&super, inode_bitmap.data());
