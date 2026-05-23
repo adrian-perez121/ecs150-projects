@@ -140,6 +140,7 @@ class LocalFileSystem {
   // Very important that when this is called, inodeBitmap is the right size or 
   // else there will be memory issues
   void readInodeBitmap(super_t *super, unsigned char *inodeBitmap);
+  // Will write into the inode bitmap but doesn't check if the write is valid
   void writeInodeBitmap(super_t *super, unsigned char *inodeBitmap);
   void readDataBitmap(super_t *super, unsigned char *dataBitmap);
   void writeDataBitmap(super_t *super, unsigned char *dataBitmap);

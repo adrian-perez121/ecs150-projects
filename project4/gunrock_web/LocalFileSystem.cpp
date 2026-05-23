@@ -39,6 +39,18 @@ void LocalFileSystem::readInodeBitmap(super_t *super, unsigned char *inodeBitmap
 }
 
 void LocalFileSystem::writeInodeBitmap(super_t *super, unsigned char *inodeBitmap) {
+  int bitmap_addr = super->inode_bitmap_addr;
+  int bitmap_len = super->inode_bitmap_len;
+  int bytes_remaining = (super->num_inodes + 7) / 8;
+
+  unsigned char buffer[UFS_BLOCK_SIZE];
+
+  for (int i = 0; i < bitmap_len; i++) {
+    memcpy(buffer, inodeBitmap + (UFS_BLOCK_SIZE) * i, min(bytes_remaining, UFS_BLOCK_SIZE));
+    this->disk->writeBlock(bitmap_addr + i, buffer);
+
+    bytes_remaining = bytes_remaining - UFS_BLOCK_SIZE;
+  }
 
 }
 
@@ -59,6 +71,18 @@ void LocalFileSystem::readDataBitmap(super_t *super, unsigned char *dataBitmap) 
 }
 
 void LocalFileSystem::writeDataBitmap(super_t *super, unsigned char *dataBitmap) {
+  int bitmap_addr = super->data_bitmap_addr;
+  int bitmap_len = super->data_bitmap_len;
+  int bytes_remaining = (super->num_data + 7) / 8;
+
+  unsigned char buffer[UFS_BLOCK_SIZE];
+
+  for (int i = 0; i < bitmap_len; i++) {
+    memcpy(buffer, dataBitmap + (UFS_BLOCK_SIZE) * i, min(bytes_remaining, UFS_BLOCK_SIZE));
+    this->disk->writeBlock(bitmap_addr + i, buffer);
+
+    bytes_remaining = bytes_remaining - UFS_BLOCK_SIZE;
+  }
 
 }
 
@@ -77,7 +101,17 @@ void LocalFileSystem::readInodeRegion(super_t *super, inode_t *inodes) {
 }
 
 void LocalFileSystem::writeInodeRegion(super_t *super, inode_t *inodes) {
+  int inode_addr = super->inode_region_addr;
+  int inode_region_len = super->inode_region_len;
+  int bytes_remaining = super->num_inodes * sizeof(inode_t); 
 
+  unsigned char buffer[UFS_BLOCK_SIZE];
+
+  for (int i = 0; i < inode_region_len; i++) {
+    memcpy(buffer, inodes + (UFS_BLOCK_SIZE / sizeof(inode_t)) * i, min(bytes_remaining, UFS_BLOCK_SIZE));
+    disk->writeBlock(inode_addr + i, (void *) buffer);
+    bytes_remaining = bytes_remaining - UFS_BLOCK_SIZE;
+  }
 }
 
 int LocalFileSystem::lookup(int parentInodeNumber, string name) {
