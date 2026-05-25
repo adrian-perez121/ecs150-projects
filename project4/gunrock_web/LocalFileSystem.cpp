@@ -205,11 +205,12 @@ int LocalFileSystem::read(int inodeNumber, void *buffer, int size) {
   }
 
   // Make sure we can read the amount of bytes we are being asked of 
-  if (size < 0 || size > inode.size) {
+  if (size < 0) {
     return -EINVALIDSIZE;
   }
 
-  int bytes_remaining = size;
+  // If size is larger then only read the bytes in the object
+  int bytes_remaining = min(size, inode.size);
   int i = 0;
   int block_addr;
   unsigned char disk_buffer[UFS_BLOCK_SIZE];
