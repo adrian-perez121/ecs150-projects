@@ -98,7 +98,7 @@ class LocalFileSystem {
    * Failure modes: invalid inodeNumber, invalid size, not a regular file
    * (because you can't write to directories).
    */
-  int write(int inodeNumber, const void *buffer, int size);
+  int write(int inodeNumber, const void *buffer, int size, bool to_dir);
 
   /**
    * Read the contents of a file or directory.
