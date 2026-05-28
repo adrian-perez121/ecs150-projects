@@ -244,6 +244,113 @@ int LocalFileSystem::read(int inodeNumber, void *buffer, int size) {
 }
 
 int LocalFileSystem::create(int parentInodeNumber, int type, string name) {
+  // Make sure the proper bit maps are change and make sure that the file is added to the directory entry on disk
+  super_t super;
+  inode_t parent_inode;
+  int child_inode_number;
+  inode_t child_inode = {type, 0}; // an initial value that can get overwritten later
+
+  readSuperBlock(&super);
+
+  if (stat(parentInodeNumber, &parent_inode) != 0) {
+    return -EINVALIDINODE;
+  }
+
+  if (parent_inode.type != UFS_DIRECTORY) {
+    return -EINVALIDTYPE;
+  }
+
+  // .size() doesn't take into account \0 we have to take it into account
+  if (name.size() + 1 > DIR_ENT_NAME_SIZE) {
+    return -EINVALIDNAME;
+  }
+
+  if ((child_inode_number = lookup(parentInodeNumber, name)) < 0) {
+    // Find the first available inode
+    vector<unsigned char> inode_bitmap((super.num_inodes + 7) / 8);
+    readInodeBitmap(&super, inode_bitmap.data());
+
+    int empty_inode;
+    int new_inode_num = 0;
+    int byte_index = 0;
+    int bit_location = 0;
+    for (auto byte : inode_bitmap) {
+
+      for (bit_location = 0; bit_location < 8 && new_inode_num < super.num_inodes; bit_location++) { // 8 represents the size of a byte
+        empty_inode = ((~byte) >> bit_location) & 1;
+
+        if (empty_inode) {
+          // add the inode to the bitmap, so we can write it in later
+          byte_index = new_inode_num / 8;
+          inode_bitmap.at(byte_index) = (byte | (1 << bit_location));
+
+          break;
+        }
+
+        new_inode_num++;
+      }
+
+      if (empty_inode) {
+        break;
+      }
+    }
+
+    // - There has be an inode available for the file to take up 
+    if (!(new_inode_num < super.num_inodes)) {
+        return -ENOTENOUGHSPACE;
+    }
+
+    child_inode_number = new_inode_num;
+
+    // This means we have to create the child ourselves
+    vector<inode_t> inodes(super.num_inodes);
+
+    readInodeRegion(&super, inodes.data());
+    inodes.at(new_inode_num) = child_inode; // This was initialized in the beginning of the function
+    writeInodeRegion(&super, inodes.data());
+
+    // Now that you have written in inode make sure to update the bit map
+    // the byte_index and bit_location shouldn't have changed from the loop broke
+    inode_bitmap.at(byte_index) = (inode_bitmap.at(byte_index) | (1 << bit_location));
+    writeInodeBitmap(&super, inode_bitmap.data());
+
+    // Make sure to update the 
+    vector<dir_ent_t> dir_entries(parent_inode.size / sizeof(dir_ent_t));
+    read(parentInodeNumber, dir_entries.data(), parent_inode.size);
+
+    dir_ent_t new_entry;
+    vector<char> characters(name.begin(), name.end());
+    characters.push_back('\0');
+
+    strcpy(new_entry.name, characters.data());
+    new_entry.inum = child_inode_number;
+
+    dir_entries.push_back(new_entry);
+
+    int total_bytes = dir_entries.size() * sizeof(dir_ent_t);
+    
+    // - There also has to be space in the directory data for the file to be listed there
+    // If we couldn't write in everything, the disk doesn't have enough space to store the directory data
+    if (write(parentInodeNumber, dir_entries.data(), total_bytes, true) != total_bytes) {
+      return -ENOTENOUGHSPACE;
+    }
+
+
+    return child_inode_number;
+  } else {
+    // The child exists and we have to check if it is of the correct type
+    if (stat(child_inode_number, &child_inode) != 0) { // This shouldn't ever happen because we did the lookup but I'm paranoid
+      return -EINVALIDINODE;
+    } 
+
+    if (child_inode.type != type) {
+      return -EINVALIDTYPE;
+    }
+
+    return child_inode_number;
+  }
+
+
   return 0;
 }
 
