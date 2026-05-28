@@ -154,7 +154,7 @@ int LocalFileSystem::stat(int inodeNumber, inode_t *inode) {
   super_t super;
   readSuperBlock(&super);
 
-  if (inodeNumber >= super.num_inodes) {
+  if (inodeNumber < 0|| inodeNumber >= super.num_inodes) {
     return -EINVALIDINODE;
   }
   
