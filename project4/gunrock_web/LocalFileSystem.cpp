@@ -314,7 +314,22 @@ int LocalFileSystem::create(int parentInodeNumber, int type, string name) {
     inode_bitmap.at(byte_index) = (inode_bitmap.at(byte_index) | (1 << bit_location));
     writeInodeBitmap(&super, inode_bitmap.data());
 
-    // Make sure to update the 
+    // If the inode is a directory it should already have two files inside of it: "." and ".."
+    if (child_inode.type == UFS_DIRECTORY) {
+      vector<dir_ent_t> initial_entries;
+      dir_ent_t parent_dir = {"..\0", parentInodeNumber};
+      dir_ent_t current_dir = {".\0", child_inode_number};
+
+      initial_entries.push_back(parent_dir);
+      initial_entries.push_back(current_dir);
+
+      // To make sure we don't run out of space
+      if (write(child_inode_number, initial_entries.data(), initial_entries.size() * sizeof(dir_ent_t), true) != (int) (initial_entries.size() * sizeof(dir_ent_t))) {
+        return -ENOTENOUGHSPACE;
+      }
+    }
+
+    // Make sure to update the directory entries of parent
     vector<dir_ent_t> dir_entries(parent_inode.size / sizeof(dir_ent_t));
     read(parentInodeNumber, dir_entries.data(), parent_inode.size);
 
