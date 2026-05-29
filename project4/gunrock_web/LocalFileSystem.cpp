@@ -481,6 +481,86 @@ int LocalFileSystem::write(int inodeNumber, const void *buffer, int size, bool t
 }
 
 int LocalFileSystem::unlink(int parentInodeNumber, string name) {
+  super_t super;
+  inode_t parent_inode;
+  int child_number;
+  inode_t child_inode;
+
+  readSuperBlock(&super);
+
+  // Make sure inode is valid...
+  if (stat(parentInodeNumber, &parent_inode) < 0) {
+    return -EINVALIDINODE;
+  }
+
+  // ...and that it is a directory...
+  if (parent_inode.type != UFS_DIRECTORY) {
+    return -EINVALIDINODE;
+  }
+  
+  // Invalid name
+  if (name.size() + 1 > DIR_ENT_NAME_SIZE) {
+    return -EINVALIDNAME;
+  }
+  
+  // You can't unlink '.' or '..'
+  if (name == "." || name == "..") {
+    return -EUNLINKNOTALLOWED;
+  }
+
+  
+  // The condition for checking if a chile exists
+  if ((child_number = lookup(parentInodeNumber, name)) >= 0) {
+    stat(child_number, &child_inode);
+    int byte_pos = 0;
+    int bit_pos = 0;
+
+    // The size being two implies the only two entries are "." and "..", hence it's empty
+    if (child_inode.type == UFS_DIRECTORY && child_inode.size / sizeof(dir_ent_t) != 2) {
+      return -EDIRNOTEMPTY;
+    }
+
+    // Deallocate the inode
+    vector<unsigned char> inode_bitmap((super.num_inodes + 7) / 8);
+    readInodeBitmap(&super, inode_bitmap.data());
+    byte_pos = child_number / 8;
+    bit_pos = child_number % 8;
+    // negate to move a 1 to the position (marks the inode as not in use) and negate again to flip the meaning of the bits
+    inode_bitmap.at(byte_pos) = ~((~inode_bitmap.at(byte_pos)) | (1 << bit_pos));
+    writeInodeBitmap(&super, inode_bitmap.data());
+
+    // Deallocate the data the inode is holding
+    int blocks = (child_inode.size + (UFS_BLOCK_SIZE - 1)) / UFS_BLOCK_SIZE;
+    vector<unsigned char> data_bitmap((super.num_data + 7) / 8);
+    readDataBitmap(&super, data_bitmap.data());
+
+    for (int i = 0; i < blocks; i++) {
+      // Again because the bitmap indices are relative
+      int block_bitmap_index = child_inode.direct[i] - super.data_region_addr;
+      byte_pos = block_bitmap_index / 8;
+      bit_pos = block_bitmap_index % 8;
+      data_bitmap.at(byte_pos) = ~((~data_bitmap.at(byte_pos)) | (1 << bit_pos));
+    } 
+
+    writeDataBitmap(&super, data_bitmap.data());
+
+    // Remove the directory entry
+    vector<dir_ent_t> old_parent_entries(parent_inode.size / sizeof(dir_ent_t));
+    read(parentInodeNumber, old_parent_entries.data(), parent_inode.size);
+    vector<dir_ent_t> new_parent_entries;
+    
+    for (auto entry : old_parent_entries) {
+      if (string(entry.name) == name) {
+        continue;
+      }
+
+      new_parent_entries.push_back(entry);
+    }
+
+    // Your writing less data in so it SHOULD work, right?
+    write(parentInodeNumber, new_parent_entries.data(), new_parent_entries.size() * sizeof(dir_ent_t), true);
+  }
+
   return 0;
 }
 
