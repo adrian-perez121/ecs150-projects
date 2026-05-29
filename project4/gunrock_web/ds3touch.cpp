@@ -17,12 +17,30 @@ int main(int argc, char *argv[]) {
   }
 
   // Parse command line arguments
-  /*
+  
   Disk *disk = new Disk(argv[1], UFS_BLOCK_SIZE);
   LocalFileSystem *fileSystem = new LocalFileSystem(disk);
   int parentInode = stoi(argv[2]);
   string fileName = string(argv[3]);
-  */
+
+  disk->beginTransaction();
+
+  // 0 is reserved for the root I believe
+  if (fileSystem->create(parentInode, UFS_REGULAR_FILE, fileName) < 1) {
+    cerr << "Error creating file" << endl;
+
+    disk->rollback();
+
+    delete fileSystem;
+    delete disk;
+    return 1;
+  }
+
+  disk->commit();
+
+  delete fileSystem;
+  delete disk;
+  
   
   return 0;
 }

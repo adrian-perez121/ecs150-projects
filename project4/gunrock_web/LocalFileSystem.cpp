@@ -243,6 +243,117 @@ int LocalFileSystem::read(int inodeNumber, void *buffer, int size) {
   return 0;
 }
 
+int internalWrite(LocalFileSystem *fs, int inodeNumber, const void *buffer, int size, bool to_dir = false) {
+  // to_dir was added because the regular user shouldn't be able to write to a directory but the file system 
+  // should be able to write to directories in the case of regular file and directory creations
+  inode_t inode;
+  super_t super;
+
+  fs->readSuperBlock(&super);
+
+  if (fs->stat(inodeNumber, &inode) != 0) {
+    return -EINVALIDINODE;
+  }
+
+  if (inode.type == UFS_DIRECTORY && !to_dir) { // you are not supposed to writing to a directory
+    return -EINVALIDTYPE;
+  }
+
+  // Game plan:
+  // Now that you have to write amount of blocks, do your write 
+  // Edge case, if you need more blocks than there are available just take up the max amount of blocks you can 
+  // keep track of all the bytes being written 
+
+  // - Figure out how many blocks you need
+  int old_blocks = (inode.size + (UFS_BLOCK_SIZE - 1)) / UFS_BLOCK_SIZE;
+  int new_blocks = min((size + (UFS_BLOCK_SIZE - 1)) / UFS_BLOCK_SIZE, DIRECT_PTRS);
+
+  // The current number of data blocks the current inode now holds
+  int updated_blocks = old_blocks;
+  vector<unsigned char> data_bitmap((super.num_data + 7) / 8);
+  fs->readDataBitmap(&super, data_bitmap.data());
+
+  // BEFORE ANY WRITING: Deallocate or allocate so you get to the amount of blocks you need
+  if (old_blocks > new_blocks) {
+    // This means you need to deallocate the blocks you don't need
+    
+    int current_block_ptr = old_blocks - 1;
+
+    // Find out which blocks you won't need using the pointers 
+    // Deallocate these blocks by updating the data bitmap
+    while (current_block_ptr > new_blocks - 1) {
+      int block_addr = inode.direct[current_block_ptr];
+
+      // Note: Bitmap indexes identify disk blocks relative to the start of a region.
+      int relative_block_adr = block_addr - super.data_region_addr;
+      int byte_index = relative_block_adr / 8;
+      int byte_pos = relative_block_adr % 8;
+
+      data_bitmap.at(byte_index) = (data_bitmap.at(byte_index) & (~(1 << byte_pos)));
+
+      current_block_ptr--;
+    }
+
+    old_blocks = new_blocks;
+
+  } else if (old_blocks < new_blocks) {
+    // This means that you have to allocate new blocks 
+    int current_block_ptr = old_blocks; // This where each new block addr will be put
+    int block_addr;
+    
+    for (int i = 0; i < super.num_data && updated_blocks < new_blocks && current_block_ptr < DIRECT_PTRS; i++) {
+      int byte = i / 8;
+      int byte_pos = i % 8;
+
+      // Similar to the is_valid logic except the answer is negated
+      int is_empty = ~(data_bitmap.at(byte) >> byte_pos) & 1;
+      
+      if (is_empty) {
+        // Because bit map locations are relative
+        block_addr = i + super.data_region_addr;
+        inode.direct[current_block_ptr] = block_addr;
+        data_bitmap.at(byte) = (data_bitmap.at(byte) | (1 << byte_pos));
+
+        current_block_ptr++;
+        updated_blocks++;
+      }
+    }
+  }
+  
+  fs->writeDataBitmap(&super, data_bitmap.data());
+  
+  // Now that you have the proper amount of blocks, write to the data bitmap to
+  int bytes_written = 0;
+  int block_ptr = 0;
+  unsigned char disk_buffer[UFS_BLOCK_SIZE];
+
+  // Stop until you reach the size or you can't write anymore
+  while (bytes_written < size && block_ptr < updated_blocks) {
+    int bytes_being_written = min(size - bytes_written, UFS_BLOCK_SIZE);
+    int block_addr = inode.direct[block_ptr];
+    
+    // We can also use block ptr as an index for where in the buffer we are
+    memcpy(disk_buffer, (unsigned char *) buffer + (block_ptr * UFS_BLOCK_SIZE), bytes_being_written);
+    fs->disk->writeBlock(block_addr, disk_buffer);
+
+    block_ptr++;
+    bytes_written = bytes_written + bytes_being_written;
+
+  }
+
+  // Now that you know how many bytes you have written make sure to update the inode and write that 
+  // to disk as well
+  inode.size = bytes_written;
+  vector<inode_t> inodes(super.num_inodes);
+  fs->readInodeRegion(&super, inodes.data());
+
+  inodes.at(inodeNumber) = inode;
+  fs->writeInodeRegion(&super, inodes.data());
+
+  // at last you are done and return the number of nodes written
+  return bytes_written;
+}
+
 int LocalFileSystem::create(int parentInodeNumber, int type, string name) {
   // Make sure the proper bit maps are change and make sure that the file is added to the directory entry on disk
   super_t super;
@@ -324,7 +435,7 @@ int LocalFileSystem::create(int parentInodeNumber, int type, string name) {
       initial_entries.push_back(current_dir);
 
       // To make sure we don't run out of space
-      if (write(child_inode_number, initial_entries.data(), initial_entries.size() * sizeof(dir_ent_t), true) != (int) (initial_entries.size() * sizeof(dir_ent_t))) {
+      if (internalWrite(this, child_inode_number, initial_entries.data(), initial_entries.size() * sizeof(dir_ent_t), true) != (int) (initial_entries.size() * sizeof(dir_ent_t))) {
         return -ENOTENOUGHSPACE;
       }
     }
@@ -346,7 +457,7 @@ int LocalFileSystem::create(int parentInodeNumber, int type, string name) {
     
     // - There also has to be space in the directory data for the file to be listed there
     // If we couldn't write in everything, the disk doesn't have enough space to store the directory data
-    if (write(parentInodeNumber, dir_entries.data(), total_bytes, true) != total_bytes) {
+    if (internalWrite(this, parentInodeNumber, dir_entries.data(), total_bytes, true) != total_bytes) {
       return -ENOTENOUGHSPACE;
     }
 
@@ -369,115 +480,8 @@ int LocalFileSystem::create(int parentInodeNumber, int type, string name) {
   return 0;
 }
 
-int LocalFileSystem::write(int inodeNumber, const void *buffer, int size, bool to_dir = false) {
-  // to_dir was added because the regular user shouldn't be able to write to a directory but the file system 
-  // should be able to write to directories in the case of regular file and directory creations
-  inode_t inode;
-  super_t super;
-
-  readSuperBlock(&super);
-
-  if (stat(inodeNumber, &inode) != 0) {
-    return -EINVALIDINODE;
-  }
-
-  if (inode.type == UFS_DIRECTORY && !to_dir) { // you are not supposed to writing to a directory
-    return -EINVALIDTYPE;
-  }
-
-  // Game plan:
-  // Now that you have to write amount of blocks, do your write 
-  // Edge case, if you need more blocks than there are available just take up the max amount of blocks you can 
-  // keep track of all the bytes being written 
-
-  // - Figure out how many blocks you need
-  int old_blocks = (inode.size + (UFS_BLOCK_SIZE - 1)) / UFS_BLOCK_SIZE;
-  int new_blocks = min((size + (UFS_BLOCK_SIZE - 1)) / UFS_BLOCK_SIZE, DIRECT_PTRS);
-
-  // The current number of data blocks the current inode now holds
-  int updated_blocks = old_blocks;
-  vector<unsigned char> data_bitmap((super.num_data + 7) / 8);
-  readDataBitmap(&super, data_bitmap.data());
-
-  // BEFORE ANY WRITING: Deallocate or allocate so you get to the amount of blocks you need
-  if (old_blocks > new_blocks) {
-    // This means you need to deallocate the blocks you don't need
-    
-    int current_block_ptr = old_blocks - 1;
-
-    // Find out which blocks you won't need using the pointers 
-    // Deallocate these blocks by updating the data bitmap
-    while (current_block_ptr > new_blocks - 1) {
-      int block_addr = inode.direct[current_block_ptr];
-
-      // Note: Bitmap indexes identify disk blocks relative to the start of a region.
-      int relative_block_adr = block_addr - super.data_region_addr;
-      int byte_index = relative_block_adr / 8;
-      int byte_pos = relative_block_adr % 8;
-
-      data_bitmap.at(byte_index) = (data_bitmap.at(byte_index) & (~(1 << byte_pos)));
-
-      current_block_ptr--;
-    }
-
-    old_blocks = new_blocks;
-
-  } else if (old_blocks < new_blocks) {
-    // This means that you have to allocate new blocks 
-    int current_block_ptr = old_blocks; // This where each new block addr will be put
-    int block_addr;
-    
-    for (int i = 0; i < super.num_data && updated_blocks < new_blocks && current_block_ptr < DIRECT_PTRS; i++) {
-      int byte = i / 8;
-      int byte_pos = i % 8;
-
-      // Similar to the is_valid logic except the answer is negated
-      int is_empty = ~(data_bitmap.at(byte) >> byte_pos) & 1;
-      
-      if (is_empty) {
-        // Because bit map locations are relative
-        block_addr = i + super.data_region_addr;
-        inode.direct[current_block_ptr] = block_addr;
-        data_bitmap.at(byte) = (data_bitmap.at(byte) | (1 << byte_pos));
-
-        current_block_ptr++;
-        updated_blocks++;
-      }
-    }
-  }
-  
-  writeDataBitmap(&super, data_bitmap.data());
-  
-  // Now that you have the proper amount of blocks, write to the data bitmap to
-  int bytes_written = 0;
-  int block_ptr = 0;
-  unsigned char disk_buffer[UFS_BLOCK_SIZE];
-
-  // Stop until you reach the size or you can't write anymore
-  while (bytes_written < size && block_ptr < updated_blocks) {
-    int bytes_being_written = min(size - bytes_written, UFS_BLOCK_SIZE);
-    int block_addr = inode.direct[block_ptr];
-    
-    // We can also use block ptr as an index for where in the buffer we are
-    memcpy(disk_buffer, (unsigned char *) buffer + (block_ptr * UFS_BLOCK_SIZE), bytes_being_written);
-    disk->writeBlock(block_addr, disk_buffer);
-
-    block_ptr++;
-    bytes_written = bytes_written + bytes_being_written;
-
-  }
-
-  // Now that you know how many bytes you have written make sure to update the inode and write that 
-  // to disk as well
-  inode.size = bytes_written;
-  vector<inode_t> inodes(super.num_inodes);
-  readInodeRegion(&super, inodes.data());
-
-  inodes.at(inodeNumber) = inode;
-  writeInodeRegion(&super, inodes.data());
-
-  // at last you are done and return the number of nodes written
-  return bytes_written;
+int LocalFileSystem::write(int inodeNumber, const void *buffer, int size) {
+  return internalWrite(this, inodeNumber, buffer, size, false);
 }
 
 int LocalFileSystem::unlink(int parentInodeNumber, string name) {
@@ -558,7 +562,7 @@ int LocalFileSystem::unlink(int parentInodeNumber, string name) {
     }
 
     // Your writing less data in so it SHOULD work, right?
-    write(parentInodeNumber, new_parent_entries.data(), new_parent_entries.size() * sizeof(dir_ent_t), true);
+    internalWrite(this, parentInodeNumber, new_parent_entries.data(), new_parent_entries.size() * sizeof(dir_ent_t), true);
   }
 
   return 0;
